@@ -199,14 +199,18 @@ router.get('/me', authenticateToken, async (req: AuthRequest, res: Response) => 
     if (!user) return res.status(404).json({ error: 'User not found' });
 
     res.json({
-      user: { id: user.id, email: user.email, fullName: user.fullName },
-      activeOrgId: req.user!.activeOrgId,
-      role: req.user!.role,
-      memberships: user.memberships.map((m) => ({
-        orgId: m.orgId,
-        orgName: m.organization.name,
-        role: m.role,
-      })),
+      user: {
+        id: user.id,
+        email: user.email,
+        fullName: user.fullName,
+        activeOrgId: req.user!.activeOrgId,
+        role: req.user!.role,
+        memberships: user.memberships.map((m) => ({
+          orgId: m.orgId,
+          orgName: m.organization.name,
+          role: m.role,
+        })),
+      },
     });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch user context' });

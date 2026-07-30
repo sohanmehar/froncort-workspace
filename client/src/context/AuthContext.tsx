@@ -11,7 +11,8 @@ interface User {
   activeOrgId: string;
   role: string;
   memberships: Array<{
-    organization: { id: string; name: string; domain: string };
+    orgId: string;
+    orgName: string;
     role: string;
   }>;
 }
@@ -59,7 +60,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const login = (newToken: string, newUser: User) => {
     localStorage.setItem('token', newToken);
     setToken(newToken);
-    setUser(newUser);
+    fetchMe(); // Fresh fetch guarantees updated role context from backend JWT payload
     router.push('/dashboard');
   };
 
@@ -81,7 +82,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       const res = await API.post('/auth/switch-org', { targetOrgId });
       localStorage.setItem('token', res.data.token);
       setToken(res.data.token);
-      setUser(res.data.user);
+      fetchMe();
       window.location.reload();
     } catch (err) {
       console.error('Failed to switch org', err);

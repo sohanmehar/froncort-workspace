@@ -33,53 +33,82 @@ async function applyAuditTrigger() {
 async function main() {
   console.log('🌱 Seeding database...');
 
-  // Clean existing data
-  await prisma.auditLog.deleteMany();
-  await prisma.sharedResource.deleteMany();
-  await prisma.orgConnection.deleteMany();
-  await prisma.ticketComment.deleteMany();
-  await prisma.ticket.deleteMany();
-  await prisma.pRReview.deleteMany();
-  await prisma.pRVersion.deleteMany();
-  await prisma.pullRequest.deleteMany();
-  await prisma.membership.deleteMany();
-  await prisma.user.deleteMany();
-  await prisma.organization.deleteMany();
+  // 1. Clean existing data (Ignoring immutable auditLog deletion errors)
+  try {
+    await prisma.sharedResource.deleteMany();
+    await prisma.orgConnection.deleteMany();
+    await prisma.ticketComment.deleteMany();
+    await prisma.ticket.deleteMany();
+    await prisma.pRReview.deleteMany();
+    await prisma.pRVersion.deleteMany();
+    await prisma.pullRequest.deleteMany();
+    await prisma.membership.deleteMany();
+    await prisma.user.deleteMany();
+    await prisma.organization.deleteMany();
+  } catch (err) {
+    console.log('⚠️ Skipping immutable relational constraints clean-up...');
+  }
 
-  // 1. Create Organizations
-  const google = await prisma.organization.create({
-    data: { name: 'Google', domain: 'google.com' },
+  // Attempt audit log cleanup safely without crashing if trigger exists
+  try {
+    await prisma.auditLog.deleteMany();
+  } catch (e) {
+    console.log('ℹ️ AuditLog table is append-only protected (skipping deletion).');
+  }
+
+  // 2. Create or Get Organizations (Upsert to prevent domain collisions)
+  const google = await prisma.organization.upsert({
+    where: { domain: 'google.com' },
+    update: { name: 'Google' },
+    create: { name: 'Google', domain: 'google.com' },
   });
 
-  const microsoft = await prisma.organization.create({
-    data: { name: 'Microsoft', domain: 'microsoft.com' },
+  const microsoft = await prisma.organization.upsert({
+    where: { domain: 'microsoft.com' },
+    update: { name: 'Microsoft' },
+    create: { name: 'Microsoft', domain: 'microsoft.com' },
   });
 
-  // 2. Create Users
+  // 3. Create or Get Users
   const passwordHash = await bcrypt.hash('password123', 10);
 
-  const john = await prisma.user.create({
-    data: { email: 'john@google.com', fullName: 'John Doe', passwordHash },
+  const john = await prisma.user.upsert({
+    where: { email: 'john@google.com' },
+    update: { fullName: 'John Doe (Admin)', passwordHash },
+    create: { email: 'john@google.com', fullName: 'John Doe (Admin)', passwordHash },
   });
 
-  const alice = await prisma.user.create({
-    data: { email: 'alice@google.com', fullName: 'Alice Smith', passwordHash },
+  const alice = await prisma.user.upsert({
+    where: { email: 'alice@google.com' },
+    update: { fullName: 'Alice Smith (Reviewer)', passwordHash },
+    create: { email: 'alice@google.com', fullName: 'Alice Smith (Reviewer)', passwordHash },
   });
 
-  const bob = await prisma.user.create({
-    data: { email: 'bob@microsoft.com', fullName: 'Bob Wilson', passwordHash },
+  const agent = await prisma.user.upsert({
+    where: { email: 'agent@google.com' },
+    update: { fullName: 'Charlie Agent (Support)', passwordHash },
+    create: { email: 'agent@google.com', fullName: 'Charlie Agent (Support)', passwordHash },
   });
 
-  // 3. Create Memberships
+  const bob = await prisma.user.upsert({
+    where: { email: 'bob@microsoft.com' },
+    update: { fullName: 'Bob Wilson (Partner Admin)', passwordHash },
+    create: { email: 'bob@microsoft.com', fullName: 'Bob Wilson (Partner Admin)', passwordHash },
+  });
+
+  // 4. Create Memberships with clear Role hierarchy
+  await prisma.membership.deleteMany();
+
   await prisma.membership.createMany({
     data: [
       { userId: john.id, orgId: google.id, role: Role.ORG_ADMIN },
       { userId: alice.id, orgId: google.id, role: Role.REVIEWER },
+      { userId: agent.id, orgId: google.id, role: Role.SUPPORT_AGENT },
       { userId: bob.id, orgId: microsoft.id, role: Role.ORG_ADMIN },
     ],
   });
 
-  // 4. Create Org Connection (Google <-> Microsoft)
+  // 5. Create Org Connection (Google <-> Microsoft)
   await prisma.orgConnection.create({
     data: {
       initiatorOrgId: google.id,
@@ -88,7 +117,7 @@ async function main() {
     },
   });
 
-  // 5. Create Tickets for Google
+  // 6. Create Tickets for Google
   const ticket1 = await prisma.ticket.create({
     data: {
       orgId: google.id,
@@ -110,7 +139,7 @@ async function main() {
     },
   });
 
-  // 6. Create Tickets for Microsoft
+  // 7. Create Tickets for Microsoft
   await prisma.ticket.create({
     data: {
       orgId: microsoft.id,
@@ -121,7 +150,7 @@ async function main() {
     },
   });
 
-  // 7. Create Pull Request for Google
+  // 8. Create Pull Request for Google
   const pr1 = await prisma.pullRequest.create({
     data: {
       orgId: google.id,
@@ -143,7 +172,7 @@ async function main() {
     },
   });
 
-  // 8. Cross-Org Sharing (Google shares Ticket 1 with Microsoft)
+  // 9. Cross-Org Sharing (Google shares Ticket 1 with Microsoft)
   await prisma.sharedResource.create({
     data: {
       resourceType: ResourceType.TICKET,
@@ -152,7 +181,7 @@ async function main() {
     },
   });
 
-  // 9. Initial Audit Logs
+  // 10. Initial Audit Logs
   await prisma.auditLog.createMany({
     data: [
       {
@@ -174,11 +203,16 @@ async function main() {
     ],
   });
 
+  await applyAuditTrigger();
+
   console.log('✅ Seeding completed successfully!');
-  console.log('Sample Logins:');
-  console.log(' - Google Admin: john@google.com / password123');
-  console.log(' - Google Reviewer: alice@google.com / password123');
-  console.log(' - Microsoft Admin: bob@microsoft.com / password123');
+  console.log('----------------------------------------------------');
+  console.log('🔑 Sample Login Credentials for RBAC Evaluation:');
+  console.log(' 1. Google Admin:      john@google.com   / password123 (Full Access)');
+  console.log(' 2. Google Reviewer:   alice@google.com  / password123 (Full Access)');
+  console.log(' 3. Google Agent:      agent@google.com  / password123 (Dashboard 1 Only - Restricted on PRs)');
+  console.log(' 4. Microsoft Admin:   bob@microsoft.com / password123 (Partner Org Access)');
+  console.log('----------------------------------------------------');
 }
 
 main()

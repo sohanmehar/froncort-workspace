@@ -22,9 +22,24 @@ export default function AuditPage() {
     }
   };
 
-  const handleExportCSV = () => {
-    const token = localStorage.getItem('token');
-    window.open(`http://localhost:5000/api/audit/export?token=${token}`, '_blank');
+  const handleExportCSV = async () => {
+    try {
+      const response = await API.get('/audit/export', {
+        responseType: 'blob', // Backend se file receive karne ke liye
+      });
+
+      // Blob url bana kar auto-download trigger karna
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `audit-report-${Date.now()}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch (err) {
+      console.error('Failed to export CSV', err);
+      alert('CSV export failed!');
+    }
   };
 
   return (

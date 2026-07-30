@@ -22,7 +22,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/tickets', ticketRoutes);
 app.use('/api/prs', prRoutes);
 app.use('/api/audit', auditRoutes);
-app.use('/api/orgs', orgRoutes);
+app.use('/api/org', orgRoutes);
 
 // Health check endpoint
 app.get('/health', (req: Request, res: Response) => {
