@@ -91,15 +91,18 @@ export default function SupportHubPage() {
     }
   };
 
-  // ⚡ Filtered out current org AND any 'Froncort' org from partner dropdown options
+  // ⚡ Robust Filtering: Strict check against Name and Domain
   const fetchAllOrgs = async () => {
     try {
       const res = await API.get('/orgs');
       const orgsList = res.data.organizations || res.data || [];
-      const otherOrgs = orgsList.filter((o: any) => 
-        o.id !== user?.activeOrgId && 
-        !o.name.toLowerCase().includes('froncort')
-      );
+      const otherOrgs = orgsList.filter((o: any) => {
+        const isCurrentOrg = o.id === user?.activeOrgId;
+        const orgName = (o.name || '').toLowerCase();
+        const orgDomain = (o.domain || '').toLowerCase();
+        const isFroncort = orgName.includes('froncort') || orgDomain.includes('froncort');
+        return !isCurrentOrg && !isFroncort;
+      });
       setAvailableOrgs(otherOrgs);
     } catch (err) {
       console.error('Error fetching partner organizations', err);
@@ -460,7 +463,11 @@ export default function SupportHubPage() {
                     >
                       <option value="">Select Partner Org...</option>
                       {availableOrgs
-                        .filter((org) => !org.name.toLowerCase().includes('froncort'))
+                        .filter((org) => {
+                          const name = (org.name || '').toLowerCase();
+                          const domain = (org.domain || '').toLowerCase();
+                          return !name.includes('froncort') && !domain.includes('froncort');
+                        })
                         .map((org) => (
                           <option key={org.id} value={org.id}>
                             {org.name}
