@@ -21,8 +21,9 @@ export default function SupportHubPage() {
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [isModalOpen, setIsModalOpen] = useState(false);
 
-  // Partner Connections State
+  // Partner Connections State & All Available Orgs Dropdown
   const [connections, setConnections] = useState<any[]>([]);
+  const [availableOrgs, setAvailableOrgs] = useState<any[]>([]);
   const [targetOrgId, setTargetOrgId] = useState('');
   const [shareTargetOrgId, setShareTargetOrgId] = useState<Record<string, string>>({});
 
@@ -44,7 +45,10 @@ export default function SupportHubPage() {
     if (!isSuperAdmin) {
       fetchTickets();
       fetchNotifications();
-      if (isAdmin) fetchConnections();
+      if (isAdmin) {
+        fetchConnections();
+        fetchAllOrgs();
+      }
     }
   }, [user, userRole, isSuperAdmin]);
 
@@ -78,6 +82,19 @@ export default function SupportHubPage() {
     }
   };
 
+  // 🌐 Fetch all registered organizations for the Dropdown
+  const fetchAllOrgs = async () => {
+    try {
+      const res = await API.get('/orgs');
+      // Filter out own active organization
+      const orgsList = res.data.organizations || res.data || [];
+      const otherOrgs = orgsList.filter((o: any) => o.id !== user?.activeOrgId);
+      setAvailableOrgs(otherOrgs);
+    } catch (err) {
+      console.error('Error fetching partner organizations', err);
+    }
+  };
+
   const handleCreateTicket = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canManageTickets) return alert('Access Restricted: Only Admins and Support Agents can create tickets.');
@@ -105,13 +122,16 @@ export default function SupportHubPage() {
   const handleSendConnectionRequest = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isAdmin) return alert('Access Restricted: Admin privilege required.');
+    if (!targetOrgId) return alert('Please select an organization from the dropdown.');
+
     try {
       await API.post('/org/connections/request', { targetOrgId });
       setTargetOrgId('');
       alert('Connection request sent successfully!');
       fetchConnections();
-    } catch (err) {
-      alert('Failed to send connection request');
+    } catch (err: any) {
+      const msg = err?.response?.data?.error || 'Failed to send connection request';
+      alert(`⚠️ ${msg}`);
     }
   };
 
@@ -403,19 +423,28 @@ export default function SupportHubPage() {
                 </h2>
 
                 <form onSubmit={handleSendConnectionRequest} className="space-y-2">
-                  <label className="block text-xs font-semibold text-slate-600 uppercase">Connect Partner Workspace</label>
+                  <label className="block text-xs font-semibold text-slate-600 uppercase">
+                    Connect Partner Workspace
+                  </label>
                   <div className="flex gap-2">
-                    <input
-                      type="text"
+                    {/* 🎯 Clean Dropdown populated directly from DB */}
+                    <select
                       value={targetOrgId}
                       onChange={(e) => setTargetOrgId(e.target.value)}
-                      placeholder="Enter Partner Org ID"
                       required
-                      className="flex-1 px-3 py-1.5 border rounded-lg text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                    />
+                      className="flex-1 px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-none cursor-pointer"
+                    >
+                      <option value="">Select Partner Org...</option>
+                      {availableOrgs.map((org) => (
+                        <option key={org.id} value={org.id}>
+                          {org.name}
+                        </option>
+                      ))}
+                    </select>
+
                     <button
                       type="submit"
-                      className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-lg transition cursor-pointer"
+                      className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-lg transition cursor-pointer shrink-0"
                     >
                       Connect
                     </button>
@@ -423,7 +452,9 @@ export default function SupportHubPage() {
                 </form>
 
                 <div className="space-y-2 pt-3 border-t border-slate-100">
-                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Active Connections</span>
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                    Active Connections
+                  </span>
                   {connections.length === 0 ? (
                     <p className="text-xs text-slate-400">No partner connections established.</p>
                   ) : (
