@@ -126,21 +126,18 @@ export default function SupportHubPage() {
     }
   };
 
-  // 🎯 Dynamic Connection Route Fallback & Detailed Error Message
   const handleSendConnectionRequest = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isAdmin) return alert('Access Restricted: Admin privilege required.');
     if (!targetOrgId) return alert('Please select an organization from the dropdown.');
 
     try {
-      // 1. Try standard /orgs/connections/request route
       await API.post('/orgs/connections/request', { targetOrgId });
       setTargetOrgId('');
       alert('✅ Connection request sent successfully!');
       fetchConnections();
     } catch (err: any) {
       try {
-        // 2. Fallback to /org/connections/request if route alias exists
         await API.post('/org/connections/request', { targetOrgId });
         setTargetOrgId('');
         alert('✅ Connection request sent successfully!');
@@ -410,6 +407,7 @@ export default function SupportHubPage() {
               )}
             </div>
 
+            {/* 🎯 Cross-Org Shared Tickets Section with Source Org Name Badge */}
             {sharedTickets.length > 0 && (
               <div className="bg-indigo-50/60 rounded-xl border border-indigo-200 p-5 space-y-4">
                 <h3 className="font-bold text-indigo-950 flex items-center justify-between">
@@ -422,7 +420,12 @@ export default function SupportHubPage() {
                   {sharedTickets.map((ticket) => (
                     <div key={ticket.id} className="bg-white p-4 rounded-lg border border-indigo-100 shadow-sm space-y-1">
                       <div className="flex justify-between items-start">
-                        <h4 className="font-bold text-slate-900 text-sm">{ticket.title}</h4>
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-bold text-slate-900 text-sm">{ticket.title}</h4>
+                          <span className="text-[10px] font-extrabold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-md border border-indigo-200 uppercase">
+                            Shared by: {ticket.organization?.name || 'Partner Org'}
+                          </span>
+                        </div>
                         <span className="text-[10px] font-mono text-slate-400">ID: {ticket.id.slice(0, 8)}...</span>
                       </div>
                       <p className="text-xs text-slate-600">{ticket.description}</p>

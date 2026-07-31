@@ -309,7 +309,7 @@ export default function ReviewConsolePage() {
           )}
         </div>
 
-        {/* Cross-Org Shared PRs Section */}
+        {/* 🎯 Cross-Org Shared PRs Section with Source Org Name Badge */}
         {sharedPRs.length > 0 && (
           <div className="bg-indigo-50/60 rounded-2xl border border-indigo-200 p-6 space-y-4">
             <h3 className="font-bold text-indigo-950 flex items-center justify-between">
@@ -322,8 +322,13 @@ export default function ReviewConsolePage() {
               {sharedPRs.map((pr) => (
                 <div key={pr.id} className="bg-white p-5 rounded-xl border border-indigo-100 shadow-sm space-y-2">
                   <div className="flex justify-between items-center">
-                    <h4 className="font-bold text-slate-900 text-sm">{pr.title}</h4>
-                    <span className="text-xs text-slate-400 font-mono">Shared by Partner Org</span>
+                    <div className="flex items-center gap-2">
+                      <h4 className="font-bold text-slate-900 text-sm">{pr.title}</h4>
+                      <span className="text-[10px] font-extrabold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-md border border-indigo-200 uppercase">
+                        Shared by: {pr.organization?.name || 'Partner Org'}
+                      </span>
+                    </div>
+                    <span className="text-xs text-slate-400 font-mono">v{pr.versions?.[0]?.versionNumber || 1}</span>
                   </div>
                   <div className="bg-slate-950 text-slate-100 p-3 rounded-lg font-mono text-xs overflow-x-auto">
                     <pre>{pr.versions?.[0]?.diff || pr.description || 'Initial Diff'}</pre>

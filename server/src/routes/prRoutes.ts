@@ -7,7 +7,7 @@ const router = Router();
 
 router.use(authenticateToken);
 
-// 1. GET ALL PRS (Active Org Scope + Shared PRs)
+// 1. GET ALL PRS (Active Org Scope + Shared PRs with Owner Organization)
 router.get('/', async (req: AuthRequest, res: Response) => {
   const activeOrgId = req.user!.activeOrgId;
 
@@ -17,6 +17,7 @@ router.get('/', async (req: AuthRequest, res: Response) => {
       include: {
         reviews: { include: { reviewer: { select: { fullName: true, email: true } } } },
         versions: { orderBy: { versionNumber: 'desc' } },
+        organization: { select: { id: true, name: true } },
         sharedEntries: true,
       },
       orderBy: { createdAt: 'desc' },
@@ -32,6 +33,7 @@ router.get('/', async (req: AuthRequest, res: Response) => {
           include: {
             reviews: { include: { reviewer: { select: { fullName: true, email: true } } } },
             versions: { orderBy: { versionNumber: 'desc' } },
+            organization: { select: { id: true, name: true } }, // 👈 Includes source org name
           },
         },
       },
@@ -134,7 +136,7 @@ router.post('/:id/share', async (req: AuthRequest, res: Response) => {
       return res.json({ message: 'PR is already shared with this organization', shareRecord: existingShare });
     }
 
-    // 2. Create Shared Resource record (Clean payload according to Prisma Schema)
+    // 2. Create Shared Resource record
     const shareRecord = await prisma.$transaction(async (tx) => {
       const shared = await tx.sharedResource.create({
         data: {
@@ -233,7 +235,7 @@ router.post('/:id/review', async (req: AuthRequest, res: Response) => {
   }
 });
 
-// 5. PUSH NEW VERSION (Endpoint Required by Frontend)
+// 5. PUSH NEW VERSION
 router.post('/:id/version', async (req: AuthRequest, res: Response) => {
   const prId = req.params.id as string;
   const { title, description, diff } = req.body;

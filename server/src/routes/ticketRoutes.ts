@@ -8,7 +8,7 @@ const router = Router();
 // Apply Auth Middleware to all routes
 router.use(authenticateToken);
 
-// 1. GET ALL TICKETS (Scoped to Active Org + Shared Tickets)
+// 1. GET ALL TICKETS (Scoped to Active Org + Shared Tickets with Owner Organization)
 router.get('/', async (req: AuthRequest, res: Response) => {
   const activeOrgId = req.user!.activeOrgId;
 
@@ -18,6 +18,7 @@ router.get('/', async (req: AuthRequest, res: Response) => {
       include: {
         comments: true,
         sharedEntries: true,
+        organization: { select: { id: true, name: true } }, // 👈 Include Org details
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -29,7 +30,10 @@ router.get('/', async (req: AuthRequest, res: Response) => {
       },
       include: {
         ticket: {
-          include: { comments: true },
+          include: { 
+            comments: true,
+            organization: { select: { id: true, name: true } }, // 👈 Include Source Org Name
+          },
         },
       },
     });
@@ -90,7 +94,7 @@ router.post('/', async (req: AuthRequest, res: Response) => {
   }
 });
 
-// 3. GET SINGLE TICKET (With BOLA Protection)
+// 3. GET SINGLE TICKET (With BOLA Protection & Org Details)
 router.get('/:id', async (req: AuthRequest, res: Response) => {
   const ticketId = req.params.id as string;
   const activeOrgId = req.user!.activeOrgId;
@@ -101,6 +105,7 @@ router.get('/:id', async (req: AuthRequest, res: Response) => {
       include: {
         comments: { include: { user: { select: { fullName: true, email: true } } } },
         sharedEntries: true,
+        organization: { select: { id: true, name: true } }, // 👈 Include Org details
       },
     });
 
