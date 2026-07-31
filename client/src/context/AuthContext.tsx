@@ -36,7 +36,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const pathname = usePathname();
 
   useEffect(() => {
-    const storedToken = localStorage.getItem('token');
+    // ⚡ Changed to sessionStorage for per-tab authentication isolation
+    const storedToken = sessionStorage.getItem('token');
     if (storedToken) {
       setToken(storedToken);
       fetchMe();
@@ -86,7 +87,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       const res = await API.get('/auth/me');
       setUser(res.data.user);
     } catch {
-      localStorage.removeItem('token');
+      sessionStorage.removeItem('token');
       setUser(null);
       setToken(null);
     } finally {
@@ -95,7 +96,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const login = (newToken: string, newUser: User) => {
-    localStorage.setItem('token', newToken);
+    // ⚡ Save token in sessionStorage (isolated per tab)
+    sessionStorage.setItem('token', newToken);
     setToken(newToken);
     
     setUser(newUser); 
@@ -115,7 +117,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     } catch (e) {
       console.error(e);
     } finally {
-      localStorage.removeItem('token');
+      sessionStorage.removeItem('token');
       setUser(null);
       setToken(null);
       router.push('/login');
@@ -125,7 +127,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const switchOrg = async (targetOrgId: string): Promise<boolean> => {
     try {
       const res = await API.post('/auth/switch-org', { targetOrgId });
-      localStorage.setItem('token', res.data.token);
+      sessionStorage.setItem('token', res.data.token);
       setToken(res.data.token);
       await fetchMe();
       window.location.reload();
