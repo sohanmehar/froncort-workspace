@@ -29,7 +29,10 @@ router.get('/', async (req: AuthRequest, res: Response) => {
       },
       include: {
         pullRequest: {
-          include: { reviews: true, versions: true },
+          include: {
+            reviews: { include: { reviewer: { select: { fullName: true, email: true } } } },
+            versions: { orderBy: { versionNumber: 'desc' } },
+          },
         },
       },
     });
@@ -43,6 +46,7 @@ router.get('/', async (req: AuthRequest, res: Response) => {
       sharedPRs,
     });
   } catch (error) {
+    console.error('Error retrieving PRs:', error);
     res.status(500).json({ error: 'Failed to retrieve pull requests' });
   }
 });
@@ -97,11 +101,71 @@ router.post('/', async (req: AuthRequest, res: Response) => {
 
     res.status(201).json({ message: 'Pull Request created successfully', pr: result });
   } catch (error) {
+    console.error('Error creating PR:', error);
     res.status(500).json({ error: 'Failed to create pull request' });
   }
 });
 
-// 3. SUBMIT A REVIEW (Approve / Reject / Changes Requested)
+// 3. SHARE PR WITH PARTNER ORG
+router.post('/:id/share', async (req: AuthRequest, res: Response) => {
+  const prId = req.params.id as string;
+  const { targetOrgId } = req.body;
+  const { userId, activeOrgId } = req.user!;
+
+  if (!targetOrgId) {
+    return res.status(400).json({ error: 'Target Organization ID is required' });
+  }
+
+  try {
+    const pr = await prisma.pullRequest.findUnique({ where: { id: prId } });
+    if (!pr || pr.orgId !== activeOrgId) {
+      return res.status(403).json({ error: 'Access denied or PR not found' });
+    }
+
+    // 1. Existing share record check
+    const existingShare = await prisma.sharedResource.findFirst({
+      where: {
+        prId: prId,
+        sharedWithOrgId: targetOrgId,
+      },
+    });
+
+    if (existingShare) {
+      return res.json({ message: 'PR is already shared with this organization', shareRecord: existingShare });
+    }
+
+    // 2. Create Shared Resource record (Clean payload according to Prisma Schema)
+    const shareRecord = await prisma.$transaction(async (tx) => {
+      const shared = await tx.sharedResource.create({
+        data: {
+          resourceType: ResourceType.PR,
+          prId: prId,
+          sharedWithOrgId: targetOrgId,
+        },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          orgId: activeOrgId,
+          userId,
+          action: 'PR_SHARED',
+          entityType: 'PR',
+          entityId: prId,
+          metadata: { sharedWithOrgId: targetOrgId },
+        },
+      });
+
+      return shared;
+    });
+
+    return res.status(201).json({ message: 'PR shared successfully', shareRecord });
+  } catch (error: any) {
+    console.error('❌ Share PR Error:', error);
+    return res.status(500).json({ error: 'Failed to share PR', details: error?.message });
+  }
+});
+
+// 4. SUBMIT A REVIEW
 router.post('/:id/review', async (req: AuthRequest, res: Response) => {
   const prId = req.params.id as string;
   const { status, comment } = req.body;
@@ -121,10 +185,6 @@ router.post('/:id/review', async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ error: 'Pull Request not found' });
     }
 
-    if (pr.orgId !== activeOrgId) {
-      return res.status(403).json({ error: 'Forbidden: Cannot review external organization PR' });
-    }
-
     const review = await prisma.$transaction(async (tx) => {
       const newReview = await tx.pRReview.create({
         data: {
@@ -135,7 +195,6 @@ router.post('/:id/review', async (req: AuthRequest, res: Response) => {
         },
       });
 
-      // Count approvals
       const currentReviews = await tx.pRReview.findMany({ where: { prId } });
       const approvalCount = currentReviews.filter((r) => r.status === 'APPROVED').length;
 
@@ -153,7 +212,6 @@ router.post('/:id/review', async (req: AuthRequest, res: Response) => {
         data: { status: newPrStatus },
       });
 
-      // Audit Log
       await tx.auditLog.create({
         data: {
           orgId: activeOrgId,
@@ -170,14 +228,15 @@ router.post('/:id/review', async (req: AuthRequest, res: Response) => {
 
     res.status(201).json({ message: 'Review submitted successfully', review });
   } catch (error) {
+    console.error('Error submitting review:', error);
     res.status(500).json({ error: 'Failed to submit review' });
   }
 });
 
-// 4. EDIT PR (Creates New Version + Diff)
-router.put('/:id', async (req: AuthRequest, res: Response) => {
+// 5. PUSH NEW VERSION (Endpoint Required by Frontend)
+router.post('/:id/version', async (req: AuthRequest, res: Response) => {
   const prId = req.params.id as string;
-  const { title, description } = req.body;
+  const { title, description, diff } = req.body;
   const { userId, activeOrgId } = req.user!;
 
   try {
@@ -193,14 +252,12 @@ router.put('/:id', async (req: AuthRequest, res: Response) => {
     const latestVersion = pr.versions[0]?.versionNumber || 1;
     const nextVersionNumber = latestVersion + 1;
 
-    const diffText = `Updated Title: "${pr.title}" -> "${title}". Updated Description.`;
-
     const updatedPr = await prisma.$transaction(async (tx) => {
       const updated = await tx.pullRequest.update({
         where: { id: prId },
         data: {
-          title: String(title),
-          description: String(description),
+          title: title ? String(title) : pr.title,
+          description: description ? String(description) : pr.description,
           status: PRStatus.IN_REVIEW,
         },
       });
@@ -209,9 +266,9 @@ router.put('/:id', async (req: AuthRequest, res: Response) => {
         data: {
           prId,
           versionNumber: nextVersionNumber,
-          title: String(title),
-          description: String(description),
-          diff: diffText,
+          title: title ? String(title) : pr.title,
+          description: description ? String(description) : pr.description,
+          diff: diff ? String(diff) : 'Updated version diff',
         },
       });
 
@@ -229,9 +286,10 @@ router.put('/:id', async (req: AuthRequest, res: Response) => {
       return updated;
     });
 
-    res.json({ message: 'PR updated and new version created', pr: updatedPr });
+    res.json({ message: 'PR version updated successfully', pr: updatedPr });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to update PR' });
+    console.error('Error creating version:', error);
+    res.status(500).json({ error: 'Failed to push new PR version' });
   }
 });
 

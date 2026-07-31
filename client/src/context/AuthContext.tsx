@@ -23,7 +23,7 @@ interface AuthContextType {
   loading: boolean;
   login: (token: string, user: User) => void;
   logout: () => Promise<void>;
-  switchOrg: (orgId: string) => Promise<void>;
+  switchOrg: (orgId: string) => Promise<boolean>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -60,8 +60,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const login = (newToken: string, newUser: User) => {
     localStorage.setItem('token', newToken);
     setToken(newToken);
-    fetchMe(); // Fresh fetch guarantees updated role context from backend JWT payload
-    router.push('/dashboard');
+    fetchMe();
+
+    // ⚡ Super Admin auto-redirects directly to Dedicated Platform Admin Console (/admin)
+    if (newUser.role === 'SUPER_ADMIN' || newUser.role === 'PLATFORM_SUPER_ADMIN') {
+      router.push('/admin');
+    } else {
+      router.push('/dashboard');
+    }
   };
 
   const logout = async () => {
@@ -77,15 +83,19 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
-  const switchOrg = async (targetOrgId: string) => {
+  const switchOrg = async (targetOrgId: string): Promise<boolean> => {
     try {
       const res = await API.post('/auth/switch-org', { targetOrgId });
       localStorage.setItem('token', res.data.token);
       setToken(res.data.token);
-      fetchMe();
+      await fetchMe();
       window.location.reload();
-    } catch (err) {
+      return true;
+    } catch (err: any) {
       console.error('Failed to switch org', err);
+      const msg = err?.response?.data?.error || 'Access Denied: You do not have membership in target organization.';
+      alert(`⚠️ Organization Switch Blocked (403)\n\n${msg}`);
+      return false;
     }
   };
 
