@@ -52,10 +52,15 @@ export default function ReviewConsolePage() {
 
   const fetchConnections = async () => {
     try {
-      const res = await API.get('/org/connections');
+      const res = await API.get('/orgs/connections');
       setConnections(res.data.connections || []);
-    } catch (err) {
-      console.error('Error fetching connections', err);
+    } catch {
+      try {
+        const res = await API.get('/org/connections');
+        setConnections(res.data.connections || []);
+      } catch (err) {
+        console.error('Error fetching connections', err);
+      }
     }
   };
 
@@ -76,8 +81,7 @@ export default function ReviewConsolePage() {
 
   const handleReviewAction = async (prId: string, status: 'APPROVED' | 'CHANGES_REQUESTED') => {
     try {
-      // API call endpoint singular '/review'
-      const res = await API.post(`/prs/${prId}/review`, { 
+      await API.post(`/prs/${prId}/review`, { 
         status, 
         comment: status === 'APPROVED' ? 'Approved via console' : 'Requested changes via console' 
       });
@@ -112,15 +116,15 @@ export default function ReviewConsolePage() {
 
   const handleSharePR = async (prId: string) => {
     const targetOrg = shareTargetOrgId[prId];
-    if (!targetOrg) return alert('Select a partner organization first');
+    if (!targetOrg) return alert('Please select a partner organization first');
 
     try {
       const res = await API.post(`/prs/${prId}/share`, { targetOrgId: targetOrg });
-      alert(res.data.message || 'PR shared successfully with partner organization!');
+      alert(`✅ ${res.data.message || 'PR shared successfully with partner organization!'}`);
       fetchPRs();
     } catch (err: any) {
       const serverErr = err.response?.data?.details || err.response?.data?.error || err.message;
-      alert(`Failed to share PR: ${serverErr}`);
+      alert(`⚠️ Failed to share PR: ${serverErr}`);
     }
   };
 
@@ -177,7 +181,7 @@ export default function ReviewConsolePage() {
           <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
             <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider block">In Review</span>
             <span className="text-2xl font-bold text-amber-600 mt-1 block">
-              {prs.filter((p) => p.status === 'IN_REVIEW').length}
+              {prs.filter((p) => p.status === 'IN_REVIEW' || p.status === 'DRAFT').length}
             </span>
           </div>
           <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
@@ -208,7 +212,7 @@ export default function ReviewConsolePage() {
             </div>
           ) : (
             prs.map((pr) => {
-              const latestVersion = pr.versions?.[0] || { versionNumber: 1, diffSummary: pr.diffSummary || 'Initial PR creation' };
+              const latestVersion = pr.versions?.[0] || { versionNumber: 1, diff: pr.description || 'Initial PR creation' };
               const approvals = pr.reviews?.filter((r: any) => r.status === 'APPROVED').length || 0;
 
               return (
@@ -238,7 +242,7 @@ export default function ReviewConsolePage() {
                     <div className="text-slate-400 text-[10px] uppercase font-sans mb-1 font-semibold">
                       Code Diff Summary (v{latestVersion.versionNumber})
                     </div>
-                    <pre className="whitespace-pre-wrap">{latestVersion.diffSummary}</pre>
+                    <pre className="whitespace-pre-wrap">{latestVersion.diff || latestVersion.description || pr.description}</pre>
                   </div>
 
                   {/* Approvals & Actions Bar */}
@@ -247,7 +251,7 @@ export default function ReviewConsolePage() {
                       Approvals: <strong className="text-slate-900">{approvals} / 1</strong>
                     </span>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <button
                         onClick={() => setVersionModalPrId(pr.id)}
                         className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition cursor-pointer active:scale-95"
@@ -273,13 +277,13 @@ export default function ReviewConsolePage() {
                     </div>
                   </div>
 
-                  {/* Cross-Org Sharing Selector */}
+                  {/* Cross-Org Sharing Selector for Admin */}
                   {isAdmin && acceptedConnections.length > 0 && (
                     <div className="flex items-center gap-2 pt-3 border-t border-slate-100">
                       <select
                         value={shareTargetOrgId[pr.id] || ''}
                         onChange={(e) => setShareTargetOrgId({ ...shareTargetOrgId, [pr.id]: e.target.value })}
-                        className="text-xs bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1.5 focus:outline-none"
+                        className="text-xs bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1.5 focus:outline-none cursor-pointer"
                       >
                         <option value="">Select Partner Org...</option>
                         {acceptedConnections.map((c) => {
@@ -322,7 +326,7 @@ export default function ReviewConsolePage() {
                     <span className="text-xs text-slate-400 font-mono">Shared by Partner Org</span>
                   </div>
                   <div className="bg-slate-950 text-slate-100 p-3 rounded-lg font-mono text-xs overflow-x-auto">
-                    <pre>{pr.versions?.[0]?.diffSummary || pr.diffSummary || 'Initial Diff'}</pre>
+                    <pre>{pr.versions?.[0]?.diff || pr.description || 'Initial Diff'}</pre>
                   </div>
                 </div>
               ))}
