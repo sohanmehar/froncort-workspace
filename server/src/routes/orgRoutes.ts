@@ -9,68 +9,64 @@ const router = Router();
 router.use(authenticateToken);
 
 // ==========================================
-// ⚡ REAL DATABASE TENANT GOVERNANCE ENDPOINTS
+// ⚡ PLATFORM SUPER ADMIN & TENANT MANAGEMENT
 // ==========================================
 
-// 1. GET ALL ORGANIZATIONS DIRECTLY FROM POSTGRES DB
+// 1. GET ALL ORGANIZATIONS FROM DB
 router.get('/', async (req: AuthRequest, res: Response) => {
   try {
     const organizations = await prisma.organization.findMany({
       orderBy: { createdAt: 'desc' },
-      select: { id: true, name: true, domain: true, createdAt: true },
     });
-    return res.json({ organizations });
-  } catch (error: any) {
-    console.error('Error fetching orgs:', error);
-    return res.status(500).json({ error: 'Database fetch failed' });
+    res.json({ organizations });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch organizations' });
   }
 });
 
-// 2. CREATE NEW TENANT IN POSTGRES DB
+// 2. CREATE / ONBOARD NEW ORGANIZATION IN DB
 router.post('/', async (req: AuthRequest, res: Response) => {
   const { name, domain } = req.body;
 
-  if (!name || !name.trim()) {
+  if (!name) {
     return res.status(400).json({ error: 'Organization name is required' });
   }
 
-  const cleanName = name.trim();
-  const cleanDomain = domain?.trim() || `${cleanName.toLowerCase().replace(/\s+/g, '')}.com`;
+  const generatedDomain = domain?.trim() || `${name.toLowerCase().replace(/\s+/g, '')}.com`;
 
   try {
-    const existing = await prisma.organization.findFirst({
-      where: {
-        OR: [{ name: cleanName }, { domain: cleanDomain }],
-      },
+    const existingOrg = await prisma.organization.findFirst({
+      where: { OR: [{ name }, { domain: generatedDomain }] },
     });
 
-    if (existing) {
-      return res.status(200).json({ message: 'Organization already exists', organization: existing });
+    if (existingOrg) {
+      return res.status(200).json({ message: 'Organization already exists', organization: existingOrg });
     }
 
     const organization = await prisma.organization.create({
-      data: { name: cleanName, domain: cleanDomain },
+      data: { name, domain: generatedDomain },
     });
 
-    return res.status(201).json({ message: 'Organization created', organization });
+    res.status(201).json({ message: 'Organization created successfully', organization });
   } catch (error: any) {
-    console.error('Create Org DB Error:', error);
-    return res.status(500).json({ error: 'Failed to create organization in database' });
+    console.error('Create Org Error:', error);
+    res.status(500).json({ error: 'Failed to create organization in database' });
   }
 });
 
-// 3. DELETE TENANT FROM DB
+// 3. DELETE ORGANIZATION FROM DB
 router.delete('/:id', async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
+
   try {
     await prisma.organization.delete({ where: { id: String(id) } });
-    return res.json({ message: 'Organization deleted successfully' });
+    res.json({ message: 'Organization deleted successfully' });
   } catch (error) {
-    return res.status(500).json({ error: 'Failed to delete organization' });
+    res.status(500).json({ error: 'Failed to delete organization' });
   }
 });
 
-// 4. ASSIGN USER ROLE & AUTO-PROVISION USER IN DB WITH DEFAULT PASSWORD "password123"
+// 4. ASSIGN USER MEMBERSHIP (PROVISION USER WITH DEFAULT PASSWORD IF NOT EXISTS)
 router.post('/memberships', async (req: AuthRequest, res: Response) => {
   const { email, orgId, role } = req.body;
 
@@ -79,11 +75,16 @@ router.post('/memberships', async (req: AuthRequest, res: Response) => {
   }
 
   try {
-    const targetRole = (role as Role) || Role.ORG_ADMIN;
+    // Check if target Org exists
+    const org = await prisma.organization.findUnique({ where: { id: orgId } });
+    if (!org) {
+      return res.status(404).json({ error: 'Target organization not found in database' });
+    }
 
-    // Check if user exists in DB, if not auto-create with password123
-    let user = await prisma.user.findUnique({ where: { email: email.trim() } });
+    // Check if User exists in DB
+    let user = await prisma.user.findUnique({ where: { email } });
 
+    // If User doesn't exist, AUTO-CREATE user with hashed 'password123'
     if (!user) {
       const defaultPasswordHash = await bcrypt.hash('password123', 10);
       const namePart = email.split('@')[0];
@@ -91,14 +92,15 @@ router.post('/memberships', async (req: AuthRequest, res: Response) => {
 
       user = await prisma.user.create({
         data: {
-          email: email.trim(),
-          fullName: `${fullName} (${targetRole})`,
+          email,
+          fullName: `${fullName} User`,
           passwordHash: defaultPasswordHash,
         },
       });
     }
 
-    // Upsert Membership record
+    // Link/Upsert Membership
+    const targetRole = (role as Role) || Role.ORG_ADMIN;
     const membership = await prisma.membership.upsert({
       where: {
         userId_orgId: {
@@ -114,23 +116,25 @@ router.post('/memberships', async (req: AuthRequest, res: Response) => {
       },
     });
 
-    return res.json({
-      message: `User ${email} linked to org with role ${targetRole}. Login password: password123`,
-      user: { id: user.id, email: user.email },
+    res.json({
+      message: `User ${email} linked to ${org.name} with role ${targetRole}. Password: password123`,
+      user: { id: user.id, email: user.email, fullName: user.fullName },
       membership,
     });
   } catch (error: any) {
-    console.error('Membership Error:', error);
-    return res.status(500).json({ error: 'Failed to assign membership in DB' });
+    console.error('Membership Assignment Error:', error);
+    res.status(500).json({ error: 'Failed to assign membership in database' });
   }
 });
 
 // ==========================================
-// 🤝 CONNECTIONS & NOTIFICATIONS
+// 🤝 EXISTING PARTNER CONNECTIONS & NOTIFICATIONS
 // ==========================================
 
+// GET ALL PARTNER CONNECTIONS
 router.get('/connections', async (req: AuthRequest, res: Response) => {
   const activeOrgId = req.user!.activeOrgId;
+
   try {
     const connections = await prisma.orgConnection.findMany({
       where: {
@@ -141,12 +145,14 @@ router.get('/connections', async (req: AuthRequest, res: Response) => {
         receiverOrg: { select: { id: true, name: true, domain: true } },
       },
     });
+
     res.json({ connections });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch partner connections' });
   }
 });
 
+// REQUEST PARTNER CONNECTION WITH ANOTHER ORG
 router.post('/connections/request', async (req: AuthRequest, res: Response) => {
   const { targetOrgId } = req.body;
   const activeOrgId = req.user!.activeOrgId;
@@ -163,12 +169,14 @@ router.post('/connections/request', async (req: AuthRequest, res: Response) => {
         status: ConnectionStatus.PENDING,
       },
     });
+
     res.status(201).json({ message: 'Connection request sent', connection });
   } catch (error) {
     res.status(500).json({ error: 'Failed to request connection' });
   }
 });
 
+// ACCEPT / REVOKE CONNECTION
 router.patch('/connections/:id', async (req: AuthRequest, res: Response) => {
   const connectionId = req.params.id as string;
   const { status } = req.body;
@@ -182,20 +190,24 @@ router.patch('/connections/:id', async (req: AuthRequest, res: Response) => {
       where: { id: connectionId },
       data: { status: status as ConnectionStatus },
     });
+
     res.json({ message: `Connection status updated to ${status}`, connection: updated });
   } catch (error) {
     res.status(500).json({ error: 'Failed to update connection' });
   }
 });
 
+// GET USER NOTIFICATIONS / AI DIGESTS
 router.get('/notifications', async (req: AuthRequest, res: Response) => {
   const userId = req.user!.userId;
+
   try {
     const notifications = await prisma.notification.findMany({
       where: { userId },
       orderBy: { createdAt: 'desc' },
       take: 20,
     });
+
     res.json({ notifications });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch notifications' });
