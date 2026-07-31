@@ -91,11 +91,15 @@ export default function SupportHubPage() {
     }
   };
 
+  // ⚡ Filtered out current org AND any 'Froncort' org from partner dropdown options
   const fetchAllOrgs = async () => {
     try {
       const res = await API.get('/orgs');
       const orgsList = res.data.organizations || res.data || [];
-      const otherOrgs = orgsList.filter((o: any) => o.id !== user?.activeOrgId);
+      const otherOrgs = orgsList.filter((o: any) => 
+        o.id !== user?.activeOrgId && 
+        !o.name.toLowerCase().includes('froncort')
+      );
       setAvailableOrgs(otherOrgs);
     } catch (err) {
       console.error('Error fetching partner organizations', err);
@@ -407,7 +411,7 @@ export default function SupportHubPage() {
               )}
             </div>
 
-            {/* 🎯 Cross-Org Shared Tickets Section with Source Org Name Badge */}
+            {/* Cross-Org Shared Tickets Section */}
             {sharedTickets.length > 0 && (
               <div className="bg-indigo-50/60 rounded-xl border border-indigo-200 p-5 space-y-4">
                 <h3 className="font-bold text-indigo-950 flex items-center justify-between">
@@ -455,11 +459,13 @@ export default function SupportHubPage() {
                       className="flex-1 px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-none cursor-pointer"
                     >
                       <option value="">Select Partner Org...</option>
-                      {availableOrgs.map((org) => (
-                        <option key={org.id} value={org.id}>
-                          {org.name}
-                        </option>
-                      ))}
+                      {availableOrgs
+                        .filter((org) => !org.name.toLowerCase().includes('froncort'))
+                        .map((org) => (
+                          <option key={org.id} value={org.id}>
+                            {org.name}
+                          </option>
+                        ))}
                     </select>
 
                     <button
