@@ -286,14 +286,20 @@ export default function ReviewConsolePage() {
                         className="text-xs bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1.5 focus:outline-none cursor-pointer"
                       >
                         <option value="">Select Partner Org...</option>
-                        {acceptedConnections.map((c) => {
-                          const pOrg = c.initiatorOrgId === user?.activeOrgId ? c.receiverOrg : c.initiatorOrg;
-                          return (
-                            <option key={pOrg?.id} value={pOrg?.id}>
-                              {pOrg?.name}
-                            </option>
-                          );
-                        })}
+                        {acceptedConnections
+                          .filter((c) => {
+                            const pOrg = c.initiatorOrgId === user?.activeOrgId ? c.receiverOrg : c.initiatorOrg;
+                            // 🚫 'Froncort' ko dropdown options se filter out kar rahe hain
+                            return pOrg?.name && !pOrg.name.toLowerCase().includes('froncort');
+                          })
+                          .map((c) => {
+                            const pOrg = c.initiatorOrgId === user?.activeOrgId ? c.receiverOrg : c.initiatorOrg;
+                            return (
+                              <option key={pOrg?.id} value={pOrg?.id}>
+                                {pOrg?.name}
+                              </option>
+                            );
+                          })}
                       </select>
                       <button
                         onClick={() => handleSharePR(pr.id)}
