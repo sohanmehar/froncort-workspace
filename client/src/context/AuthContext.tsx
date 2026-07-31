@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import API from '@/lib/api';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 
 interface User {
   id: string;
@@ -33,6 +33,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
     const storedToken = localStorage.getItem('token');
@@ -43,6 +44,35 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setLoading(false);
     }
   }, []);
+
+  // 🛡️ Centralized Route Guard Logic
+  useEffect(() => {
+    if (loading) return;
+
+    // 1. Redirect unauthenticated users to /login
+    if (!user && pathname !== '/login') {
+      router.push('/login');
+      return;
+    }
+
+    if (user) {
+      const isSuperAdmin = user.role === 'SUPER_ADMIN' || user.role === 'PLATFORM_SUPER_ADMIN' || user.email === 'superadmin@froncort.ai';
+
+      // 2. Protect Super Admin Console (/admin)
+      if (pathname.startsWith('/admin') && !isSuperAdmin) {
+        alert('⛔ Access Denied: Platform Super Admin privileges required.');
+        router.push('/dashboard');
+        return;
+      }
+
+      // 3. Protect Review & Audit Console (/dashboard/reviews)
+      if (pathname.startsWith('/dashboard/reviews') && user.role === 'SUPPORT_AGENT') {
+        alert('⛔ Access Denied: Support Agents cannot access PR Reviews.');
+        router.push('/dashboard');
+        return;
+      }
+    }
+  }, [pathname, user, loading, router]);
 
   const fetchMe = async () => {
     try {
