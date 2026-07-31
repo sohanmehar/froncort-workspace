@@ -8,10 +8,6 @@ const router = Router();
 
 router.use(authenticateToken);
 
-// ==========================================
-// ⚡ PLATFORM SUPER ADMIN & TENANT MANAGEMENT
-// ==========================================
-
 // 1. GET ALL ORGANIZATIONS FROM DB
 router.get('/', async (req: AuthRequest, res: Response) => {
   try {
@@ -127,10 +123,6 @@ router.post('/memberships', async (req: AuthRequest, res: Response) => {
   }
 });
 
-// ==========================================
-// 🤝 EXISTING PARTNER CONNECTIONS & NOTIFICATIONS
-// ==========================================
-
 // GET ALL PARTNER CONNECTIONS
 router.get('/connections', async (req: AuthRequest, res: Response) => {
   const activeOrgId = req.user!.activeOrgId;
@@ -152,7 +144,7 @@ router.get('/connections', async (req: AuthRequest, res: Response) => {
   }
 });
 
-// REQUEST PARTNER CONNECTION WITH ANOTHER ORG
+// REQUEST / RE-ACTIVATE PARTNER CONNECTION WITH ANOTHER ORG
 router.post('/connections/request', async (req: AuthRequest, res: Response) => {
   const { targetOrgId } = req.body;
   const activeOrgId = req.user!.activeOrgId;
@@ -162,6 +154,36 @@ router.post('/connections/request', async (req: AuthRequest, res: Response) => {
   }
 
   try {
+    // Check if a connection record already exists in either direction
+    const existingConnection = await prisma.orgConnection.findFirst({
+      where: {
+        OR: [
+          { initiatorOrgId: activeOrgId, receiverOrgId: String(targetOrgId) },
+          { initiatorOrgId: String(targetOrgId), receiverOrgId: activeOrgId },
+        ],
+      },
+    });
+
+    if (existingConnection) {
+      // If connection is already active or pending, reject duplicate request
+      if (existingConnection.status === ConnectionStatus.ACCEPTED || existingConnection.status === ConnectionStatus.PENDING) {
+        return res.status(400).json({ error: `Connection request is already ${existingConnection.status.toLowerCase()}` });
+      }
+
+      // If status is REVOKED or REJECTED, update and re-activate it back to PENDING
+      const updatedConnection = await prisma.orgConnection.update({
+        where: { id: existingConnection.id },
+        data: {
+          initiatorOrgId: activeOrgId,
+          receiverOrgId: String(targetOrgId),
+          status: ConnectionStatus.PENDING,
+        },
+      });
+
+      return res.status(200).json({ message: 'Connection re-requested successfully', connection: updatedConnection });
+    }
+
+    // Create brand new connection if no record existed before
     const connection = await prisma.orgConnection.create({
       data: {
         initiatorOrgId: activeOrgId,
@@ -172,6 +194,7 @@ router.post('/connections/request', async (req: AuthRequest, res: Response) => {
 
     res.status(201).json({ message: 'Connection request sent', connection });
   } catch (error) {
+    console.error('Request Connection Error:', error);
     res.status(500).json({ error: 'Failed to request connection' });
   }
 });
