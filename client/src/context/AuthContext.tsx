@@ -49,23 +49,30 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   useEffect(() => {
     if (loading) return;
 
-    // 1. Redirect unauthenticated users to /login
+    // 1. Unauthenticated user trying to access protected routes
     if (!user && pathname !== '/login') {
       router.push('/login');
+      return;
+    }
+
+    // 2. Authenticated user visiting /login directly -> Redirect to default page
+    if (user && pathname === '/login') {
+      const isSuper = user.role === 'SUPER_ADMIN' || user.role === 'PLATFORM_SUPER_ADMIN' || user.email === 'superadmin@froncort.ai';
+      router.push(isSuper ? '/admin' : '/dashboard');
       return;
     }
 
     if (user) {
       const isSuperAdmin = user.role === 'SUPER_ADMIN' || user.role === 'PLATFORM_SUPER_ADMIN' || user.email === 'superadmin@froncort.ai';
 
-      // 2. Protect Super Admin Console (/admin)
+      // Protect Super Admin Console (/admin)
       if (pathname.startsWith('/admin') && !isSuperAdmin) {
         alert('⛔ Access Denied: Platform Super Admin privileges required.');
         router.push('/dashboard');
         return;
       }
 
-      // 3. Protect Review & Audit Console (/dashboard/reviews)
+      // Protect Review & Audit Console (/dashboard/reviews)
       if (pathname.startsWith('/dashboard/reviews') && user.role === 'SUPPORT_AGENT') {
         alert('⛔ Access Denied: Support Agents cannot access PR Reviews.');
         router.push('/dashboard');
