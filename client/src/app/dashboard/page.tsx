@@ -34,7 +34,6 @@ export default function SupportHubPage() {
   const isAgent = userRole === 'SUPPORT_AGENT';
   const canManageTickets = isAdmin || isAgent;
 
-  // ⚡ Auto-Redirect Super Admin directly to Platform Governance Console (/admin)
   useEffect(() => {
     if (isSuperAdmin) {
       router.push('/admin');
@@ -66,27 +65,35 @@ export default function SupportHubPage() {
 
   const fetchNotifications = async () => {
     try {
-      const res = await API.get('/org/notifications');
+      const res = await API.get('/orgs/notifications');
       setNotifications(res.data.notifications || []);
-    } catch (err) {
-      console.error('Error fetching notifications', err);
+    } catch {
+      try {
+        const res = await API.get('/org/notifications');
+        setNotifications(res.data.notifications || []);
+      } catch (err) {
+        console.error('Error fetching notifications', err);
+      }
     }
   };
 
   const fetchConnections = async () => {
     try {
-      const res = await API.get('/org/connections');
+      const res = await API.get('/orgs/connections');
       setConnections(res.data.connections || []);
-    } catch (err) {
-      console.error('Error fetching connections', err);
+    } catch {
+      try {
+        const res = await API.get('/org/connections');
+        setConnections(res.data.connections || []);
+      } catch (err) {
+        console.error('Error fetching connections', err);
+      }
     }
   };
 
-  // 🌐 Fetch all registered organizations for the Dropdown
   const fetchAllOrgs = async () => {
     try {
       const res = await API.get('/orgs');
-      // Filter out own active organization
       const orgsList = res.data.organizations || res.data || [];
       const otherOrgs = orgsList.filter((o: any) => o.id !== user?.activeOrgId);
       setAvailableOrgs(otherOrgs);
@@ -119,29 +126,48 @@ export default function SupportHubPage() {
     }
   };
 
+  // 🎯 Dynamic Connection Route Fallback & Detailed Error Message
   const handleSendConnectionRequest = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isAdmin) return alert('Access Restricted: Admin privilege required.');
     if (!targetOrgId) return alert('Please select an organization from the dropdown.');
 
     try {
-      await API.post('/org/connections/request', { targetOrgId });
+      // 1. Try standard /orgs/connections/request route
+      await API.post('/orgs/connections/request', { targetOrgId });
       setTargetOrgId('');
-      alert('Connection request sent successfully!');
+      alert('✅ Connection request sent successfully!');
       fetchConnections();
     } catch (err: any) {
-      const msg = err?.response?.data?.error || 'Failed to send connection request';
-      alert(`⚠️ ${msg}`);
+      try {
+        // 2. Fallback to /org/connections/request if route alias exists
+        await API.post('/org/connections/request', { targetOrgId });
+        setTargetOrgId('');
+        alert('✅ Connection request sent successfully!');
+        fetchConnections();
+      } catch (innerErr: any) {
+        const backendMessage =
+          innerErr?.response?.data?.error ||
+          innerErr?.response?.data?.message ||
+          err?.response?.data?.error ||
+          'Backend endpoint rejected request';
+        alert(`⚠️ Failed to connect: ${backendMessage}`);
+      }
     }
   };
 
   const handleRespondConnection = async (id: string, status: string) => {
     if (!isAdmin) return alert('Access Restricted: Admin privilege required.');
     try {
-      await API.patch(`/org/connections/${id}`, { status });
+      await API.patch(`/orgs/connections/${id}`, { status });
       fetchConnections();
-    } catch (err) {
-      alert('Failed to update connection status');
+    } catch {
+      try {
+        await API.patch(`/org/connections/${id}`, { status });
+        fetchConnections();
+      } catch (err) {
+        alert('Failed to update connection status');
+      }
     }
   };
 
@@ -161,7 +187,6 @@ export default function SupportHubPage() {
 
   const acceptedConnections = connections.filter((c) => c.status === 'ACCEPTED');
 
-  // Client-side Filtering
   const filteredTickets = tickets.filter((ticket) => {
     const matchesSearch =
       ticket.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -177,7 +202,6 @@ export default function SupportHubPage() {
       <Navbar />
 
       <main className="max-w-7xl mx-auto px-4 py-8 space-y-8">
-        {/* AI Progress Tracker Digest Notification Banner */}
         {notifications.length > 0 && (
           <div className="bg-indigo-900 text-white p-4 rounded-2xl shadow-lg border border-indigo-700 flex items-center justify-between">
             <div>
@@ -198,7 +222,6 @@ export default function SupportHubPage() {
           </div>
         )}
 
-        {/* Top Header & Action */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold text-slate-900">Support Hub</h1>
@@ -214,7 +237,6 @@ export default function SupportHubPage() {
           )}
         </div>
 
-        {/* Quick Stats Metric Bar */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
             <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider block">Total Tickets</span>
@@ -238,7 +260,6 @@ export default function SupportHubPage() {
           </div>
         </div>
 
-        {/* Filters Bar */}
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-wrap items-center justify-between gap-4">
           <div className="flex flex-wrap items-center gap-3 flex-1">
             <div className="relative min-w-[240px] flex-1 max-w-md">
@@ -281,7 +302,6 @@ export default function SupportHubPage() {
           )}
         </div>
 
-        {/* Main Content Layout */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className={isAdmin ? "lg:col-span-2 space-y-6" : "lg:col-span-3 space-y-6"}>
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
@@ -390,7 +410,6 @@ export default function SupportHubPage() {
               )}
             </div>
 
-            {/* Cross-Org Shared Tickets Section */}
             {sharedTickets.length > 0 && (
               <div className="bg-indigo-50/60 rounded-xl border border-indigo-200 p-5 space-y-4">
                 <h3 className="font-bold text-indigo-950 flex items-center justify-between">
@@ -414,7 +433,6 @@ export default function SupportHubPage() {
             )}
           </div>
 
-          {/* Right Sidebar: Connections Panel (ONLY VISIBLE TO ORG_ADMIN) */}
           {isAdmin && (
             <div className="space-y-6">
               <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-4">
@@ -427,7 +445,6 @@ export default function SupportHubPage() {
                     Connect Partner Workspace
                   </label>
                   <div className="flex gap-2">
-                    {/* 🎯 Clean Dropdown populated directly from DB */}
                     <select
                       value={targetOrgId}
                       onChange={(e) => setTargetOrgId(e.target.value)}
@@ -495,7 +512,6 @@ export default function SupportHubPage() {
         </div>
       </main>
 
-      {/* Modal Overlay for New Ticket Creation */}
       {isModalOpen && canManageTickets && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-100 space-y-4 animate-in fade-in zoom-in-95 duration-150">
