@@ -45,7 +45,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
   }, []);
 
-  // 🛡️ Centralized Route Guard Logic
+  // Centralized Route Guard Logic
   useEffect(() => {
     if (loading) return;
 
@@ -90,10 +90,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const login = (newToken: string, newUser: User) => {
     localStorage.setItem('token', newToken);
     setToken(newToken);
+    
+    setUser(newUser); 
+
     fetchMe();
 
-    // ⚡ Super Admin auto-redirects directly to Dedicated Platform Admin Console (/admin)
-    if (newUser.role === 'SUPER_ADMIN' || newUser.role === 'PLATFORM_SUPER_ADMIN') {
+    if (newUser.role === 'SUPER_ADMIN' || newUser.role === 'PLATFORM_SUPER_ADMIN' || newUser.email === 'superadmin@froncort.ai') {
       router.push('/admin');
     } else {
       router.push('/dashboard');

@@ -26,7 +26,7 @@ export default function SuperAdminConsole() {
       const res = await API.get('/orgs');
       const rawList = res.data?.organizations || [];
       
-      // ⚡ Filter out the internal 'Froncort Platform' org
+      //Filter out the internal 'Froncort Platform' org
       const clientOrgs = rawList.filter(
         (o: any) => o.domain !== 'froncort.ai' && !o.name.toLowerCase().includes('froncort platform')
       );
