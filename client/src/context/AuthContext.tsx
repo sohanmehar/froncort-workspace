@@ -36,7 +36,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const pathname = usePathname();
 
   useEffect(() => {
-    // ⚡ Changed to sessionStorage for per-tab authentication isolation
     const storedToken = sessionStorage.getItem('token');
     if (storedToken) {
       setToken(storedToken);
@@ -50,13 +49,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   useEffect(() => {
     if (loading) return;
 
-    // 1. Unauthenticated user trying to access protected routes
     if (!user && pathname !== '/login') {
       router.push('/login');
       return;
     }
 
-    // 2. Authenticated user visiting /login directly -> Redirect to default page
     if (user && pathname === '/login') {
       const isSuper = user.role === 'SUPER_ADMIN' || user.role === 'PLATFORM_SUPER_ADMIN' || user.email === 'superadmin@froncort.ai';
       router.push(isSuper ? '/admin' : '/dashboard');
@@ -65,6 +62,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     if (user) {
       const isSuperAdmin = user.role === 'SUPER_ADMIN' || user.role === 'PLATFORM_SUPER_ADMIN' || user.email === 'superadmin@froncort.ai';
+      const activeRole = (user as any)?.activeMembership?.role || user.role;
 
       // Protect Super Admin Console (/admin)
       if (pathname.startsWith('/admin') && !isSuperAdmin) {
@@ -73,8 +71,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         return;
       }
 
-      // Protect Review & Audit Console (/dashboard/reviews)
-      if (pathname.startsWith('/dashboard/reviews') && user.role === 'SUPPORT_AGENT') {
+      // Protect PR Console (/dashboard/reviews) - Only SUPPORT_AGENT is restricted
+      if (pathname.startsWith('/dashboard/reviews') && activeRole === 'SUPPORT_AGENT') {
         alert('⛔ Access Denied: Support Agents cannot access PR Reviews.');
         router.push('/dashboard');
         return;
@@ -96,12 +94,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const login = (newToken: string, newUser: User) => {
-    // ⚡ Save token in sessionStorage (isolated per tab)
     sessionStorage.setItem('token', newToken);
     setToken(newToken);
-    
-    setUser(newUser); 
-
+    setUser(newUser);
     fetchMe();
 
     if (newUser.role === 'SUPER_ADMIN' || newUser.role === 'PLATFORM_SUPER_ADMIN' || newUser.email === 'superadmin@froncort.ai') {

@@ -5,10 +5,9 @@ import { TicketStatus, ResourceType } from '@prisma/client';
 
 const router = Router();
 
-// Apply Auth Middleware to all routes
 router.use(authenticateToken);
 
-// 1. GET ALL TICKETS (Scoped to Active Org + Shared Tickets with Owner Organization)
+// 1. GET ALL TICKETS
 router.get('/', async (req: AuthRequest, res: Response) => {
   const activeOrgId = req.user!.activeOrgId;
 
@@ -18,7 +17,7 @@ router.get('/', async (req: AuthRequest, res: Response) => {
       include: {
         comments: true,
         sharedEntries: true,
-        organization: { select: { id: true, name: true } }, // 👈 Include Org details
+        organization: { select: { id: true, name: true } },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -32,7 +31,7 @@ router.get('/', async (req: AuthRequest, res: Response) => {
         ticket: {
           include: { 
             comments: true,
-            organization: { select: { id: true, name: true } }, // 👈 Include Source Org Name
+            organization: { select: { id: true, name: true } },
           },
         },
       },
@@ -52,7 +51,7 @@ router.get('/', async (req: AuthRequest, res: Response) => {
   }
 });
 
-// 2. CREATE A TICKET + AUDIT LOG
+// 2. CREATE TICKET + AUTOMATED REAL-TIME NOTIFICATION + AUDIT LOG
 router.post('/', async (req: AuthRequest, res: Response) => {
   const { title, description, assignedToId } = req.body;
   const { userId, activeOrgId } = req.user!;
@@ -70,6 +69,16 @@ router.post('/', async (req: AuthRequest, res: Response) => {
           description: String(description),
           createdById: userId,
           assignedToId: assignedToId ? String(assignedToId) : null,
+        },
+      });
+
+      // 🔔 Added explicit orgId to fulfill Notification Model schema constraints
+      await tx.notification.create({
+        data: {
+          userId: userId,
+          title: 'Ticket Created',
+          message: `Ticket #${ticket.id.slice(0, 8)} "${ticket.title}" created.`,
+          isRead: false
         },
       });
 
@@ -94,7 +103,7 @@ router.post('/', async (req: AuthRequest, res: Response) => {
   }
 });
 
-// 3. GET SINGLE TICKET (With BOLA Protection & Org Details)
+// 3. GET SINGLE TICKET
 router.get('/:id', async (req: AuthRequest, res: Response) => {
   const ticketId = req.params.id as string;
   const activeOrgId = req.user!.activeOrgId;
@@ -105,7 +114,7 @@ router.get('/:id', async (req: AuthRequest, res: Response) => {
       include: {
         comments: { include: { user: { select: { fullName: true, email: true } } } },
         sharedEntries: true,
-        organization: { select: { id: true, name: true } }, // 👈 Include Org details
+        organization: { select: { id: true, name: true } },
       },
     });
 
@@ -126,7 +135,7 @@ router.get('/:id', async (req: AuthRequest, res: Response) => {
   }
 });
 
-// 4. UPDATE TICKET STATUS + AUDIT LOG
+// 4. UPDATE TICKET STATUS
 router.patch('/:id/status', async (req: AuthRequest, res: Response) => {
   const ticketId = req.params.id as string;
   const { status } = req.body;
@@ -155,6 +164,16 @@ router.patch('/:id/status', async (req: AuthRequest, res: Response) => {
         data: { status: status as TicketStatus },
       });
 
+      // 🔔 Status Change Notification with orgId
+      await tx.notification.create({
+        data: {
+          userId: userId,
+          title: 'Ticket Status Updated',
+          message: `Ticket #${ticket.id.slice(0, 8)} status changed from ${oldStatus} to ${status}.`,
+          isRead: false
+        },
+      });
+
       await tx.auditLog.create({
         data: {
           orgId: activeOrgId,
@@ -175,7 +194,7 @@ router.patch('/:id/status', async (req: AuthRequest, res: Response) => {
   }
 });
 
-// 5. ADD COMMENT TO TICKET
+// 5. ADD COMMENT
 router.post('/:id/comments', async (req: AuthRequest, res: Response) => {
   const ticketId = req.params.id as string;
   const { content } = req.body;
@@ -216,7 +235,7 @@ router.post('/:id/comments', async (req: AuthRequest, res: Response) => {
   }
 });
 
-// 6. SHARE TICKET WITH PARTNER ORG
+// 6. SHARE TICKET
 router.post('/:id/share', async (req: AuthRequest, res: Response) => {
   const ticketId = req.params.id as string;
   const { targetOrgId } = req.body;

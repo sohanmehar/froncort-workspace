@@ -7,7 +7,7 @@ const router = Router();
 
 router.use(authenticateToken);
 
-// 1. GET ALL PRS (Active Org Scope + Shared PRs with Owner Organization)
+// 1. GET ALL PRS
 router.get('/', async (req: AuthRequest, res: Response) => {
   const activeOrgId = req.user!.activeOrgId;
 
@@ -33,7 +33,7 @@ router.get('/', async (req: AuthRequest, res: Response) => {
           include: {
             reviews: { include: { reviewer: { select: { fullName: true, email: true } } } },
             versions: { orderBy: { versionNumber: 'desc' } },
-            organization: { select: { id: true, name: true } }, // 👈 Includes source org name
+            organization: { select: { id: true, name: true } },
           },
         },
       },
@@ -53,7 +53,7 @@ router.get('/', async (req: AuthRequest, res: Response) => {
   }
 });
 
-// 2. CREATE PULL REQUEST + VERSION 1 + AUDIT LOG
+// 2. CREATE PULL REQUEST + AUTOMATED REAL-TIME NOTIFICATION
 router.post('/', async (req: AuthRequest, res: Response) => {
   const { title, description, requiredApprovals } = req.body;
   const { userId, activeOrgId } = req.user!;
@@ -75,26 +75,35 @@ router.post('/', async (req: AuthRequest, res: Response) => {
         },
       });
 
-      // Create Initial Version (Version 1)
       await tx.pRVersion.create({
         data: {
           prId: pr.id,
           versionNumber: 1,
           title: pr.title,
           description: pr.description,
-          diff: 'Initial PR creation',
+          diff: String(description),
         },
       });
 
-      // Append Audit Log
+      // 🔔 Added explicit orgId
+      await tx.notification.create({
+        data: {
+          userId: userId,
+          orgId: activeOrgId,
+          title: 'Pull Request Submitted',
+          message: `Pull Request "${pr.title}" submitted for review.`,
+          isRead: false
+        },
+      });
+
       await tx.auditLog.create({
         data: {
           orgId: activeOrgId,
-          userId,
+          userId: userId,
           action: 'PR_CREATED',
           entityType: 'PR',
           entityId: pr.id,
-          metadata: { title: pr.title },
+          metadata: { title: pr.title, requiredApprovals: pr.requiredApprovals },
         },
       });
 
@@ -108,7 +117,7 @@ router.post('/', async (req: AuthRequest, res: Response) => {
   }
 });
 
-// 3. SHARE PR WITH PARTNER ORG
+// 3. SHARE PR
 router.post('/:id/share', async (req: AuthRequest, res: Response) => {
   const prId = req.params.id as string;
   const { targetOrgId } = req.body;
@@ -124,7 +133,6 @@ router.post('/:id/share', async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ error: 'Access denied or PR not found' });
     }
 
-    // 1. Existing share record check
     const existingShare = await prisma.sharedResource.findFirst({
       where: {
         prId: prId,
@@ -136,7 +144,6 @@ router.post('/:id/share', async (req: AuthRequest, res: Response) => {
       return res.json({ message: 'PR is already shared with this organization', shareRecord: existingShare });
     }
 
-    // 2. Create Shared Resource record
     const shareRecord = await prisma.$transaction(async (tx) => {
       const shared = await tx.sharedResource.create({
         data: {
@@ -167,13 +174,13 @@ router.post('/:id/share', async (req: AuthRequest, res: Response) => {
   }
 });
 
-// 4. SUBMIT A REVIEW
+// 4. SUBMIT REVIEW
 router.post('/:id/review', async (req: AuthRequest, res: Response) => {
   const prId = req.params.id as string;
   const { status, comment } = req.body;
   const { userId, activeOrgId } = req.user!;
 
-  if (!['APPROVED', 'REJECTED', 'CHANGES_REQUESTED'].includes(status)) {
+  if (!['APPROVED', 'REJECTED', 'CHANGES_REQUESTED', 'MERGED'].includes(status)) {
     return res.status(400).json({ error: 'Invalid review status' });
   }
 
@@ -188,20 +195,25 @@ router.post('/:id/review', async (req: AuthRequest, res: Response) => {
     }
 
     const review = await prisma.$transaction(async (tx) => {
-      const newReview = await tx.pRReview.create({
-        data: {
-          prId,
-          reviewerId: userId,
-          status: status as PRStatus,
-          comment: comment ? String(comment) : null,
-        },
-      });
+      let newReview = null;
+      if (status !== 'MERGED') {
+        newReview = await tx.pRReview.create({
+          data: {
+            prId,
+            reviewerId: userId,
+            status: status as PRStatus,
+            comment: comment ? String(comment) : null,
+          },
+        });
+      }
 
       const currentReviews = await tx.pRReview.findMany({ where: { prId } });
       const approvalCount = currentReviews.filter((r) => r.status === 'APPROVED').length;
 
       let newPrStatus = pr.status;
-      if (status === 'CHANGES_REQUESTED') {
+      if (status === 'MERGED') {
+        newPrStatus = PRStatus.APPROVED;
+      } else if (status === 'CHANGES_REQUESTED') {
         newPrStatus = PRStatus.CHANGES_REQUESTED;
       } else if (approvalCount >= pr.requiredApprovals) {
         newPrStatus = PRStatus.APPROVED;
@@ -214,6 +226,16 @@ router.post('/:id/review', async (req: AuthRequest, res: Response) => {
         data: { status: newPrStatus },
       });
 
+      // 🔔 Review Notification with orgId
+      await tx.notification.create({
+        data: {
+          userId: userId,
+          title: `PR Review: ${status}`,
+          message: `Pull Request "${pr.title}" marked as ${status}.`,
+          isRead: false
+        },
+      });
+
       await tx.auditLog.create({
         data: {
           orgId: activeOrgId,
@@ -221,14 +243,14 @@ router.post('/:id/review', async (req: AuthRequest, res: Response) => {
           action: `PR_REVIEW_${status}`,
           entityType: 'PR',
           entityId: prId,
-          metadata: { comment },
+          metadata: { comment, approvalsCount: approvalCount, required: pr.requiredApprovals },
         },
       });
 
       return newReview;
     });
 
-    res.status(201).json({ message: 'Review submitted successfully', review });
+    res.status(201).json({ message: 'Review action processed successfully', review });
   } catch (error) {
     console.error('Error submitting review:', error);
     res.status(500).json({ error: 'Failed to submit review' });
@@ -274,10 +296,19 @@ router.post('/:id/version', async (req: AuthRequest, res: Response) => {
         },
       });
 
+      await tx.notification.create({
+        data: {
+          userId: userId,
+          title: 'PR Version Updated',
+          message: `Pull Request "${pr.title}" updated to version v${nextVersionNumber}.`,
+          isRead: false
+        },
+      });
+
       await tx.auditLog.create({
         data: {
           orgId: activeOrgId,
-          userId,
+          userId: userId,
           action: 'PR_NEW_VERSION_CREATED',
           entityType: 'PR',
           entityId: prId,

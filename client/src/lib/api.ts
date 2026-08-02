@@ -2,6 +2,7 @@ import axios from 'axios';
 
 const API = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL || 'https://froncort-backend-sxpl.onrender.com/api',
+  withCredentials: true,
 });
 
 // Request Interceptor: Attach Token

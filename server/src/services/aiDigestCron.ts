@@ -1,43 +1,57 @@
 import cron from 'node-cron';
 import { prisma } from '../config/db';
 
-export const initAIDigestCron = () => {
-  // Runs background digest generation periodically (or every hour/minute for demo)
-  cron.schedule('0 * * * *', async () => {
-    console.log('🤖 Running Background AI Progress Digest Job...');
+export const generateScheduledAIDigest = async () => {
+  try {
+    const users = await prisma.user.findMany({
+      include: {
+        memberships: {
+          include: { organization: true },
+        },
+      },
+    });
 
-    try {
-      const users = await prisma.user.findMany({
-        include: { memberships: true },
+    for (const user of users) {
+      const activeOrgId = user.memberships[0]?.orgId;
+      if (!activeOrgId) continue;
+
+      const openTickets = await prisma.ticket.count({
+        where: { orgId: activeOrgId, status: 'OPEN' },
       });
 
-      for (const user of users) {
-        if (user.memberships.length === 0) continue;
+      const pendingPRs = await prisma.pullRequest.count({
+        where: { orgId: activeOrgId, status: 'IN_REVIEW' },
+      });
 
-        const activeOrgId = user.memberships[0].orgId;
+      const message = `Personalized Digest: You have ${openTickets} active assigned ticket(s) and ${pendingPRs} PR(s) waiting for review in your workspace.`;
 
-        // Collect stats scoped strictly to user's org
-        const assignedTicketsCount = await prisma.ticket.count({
-          where: { orgId: activeOrgId, assignedToId: user.id, status: { not: 'CLOSED' } },
-        });
+      // FIX: Removed orgId from where filter
+      const existing = await prisma.notification.findFirst({
+        where: {
+          userId: user.id,
+          message: message,
+        },
+      });
 
-        const pendingPRsCount = await prisma.pullRequest.count({
-          where: { orgId: activeOrgId, status: 'IN_REVIEW' },
-        });
-
-        const digestMessage = `Personalized Digest: You have ${assignedTicketsCount} active assigned ticket(s) and ${pendingPRsCount} PR(s) waiting for review in your workspace.`;
-
+      if (!existing) {
+        // FIX: Removed orgId from creation payload
         await prisma.notification.create({
           data: {
             userId: user.id,
-            title: '📊 Scheduled AI Progress Digest',
-            message: digestMessage,
+            title: 'Scheduled AI Progress Digest',
+            message: message,
+            isRead: false,
           },
         });
       }
-      console.log('✅ Digest generated for all active users.');
-    } catch (error) {
-      console.error('Digest Job Error:', error);
     }
+  } catch (err) {
+    console.error('Error in scheduled AI digest cron:', err);
+  }
+};
+
+export const initAIDigestCron = () => {
+  cron.schedule('0 * * * *', () => {
+    generateScheduledAIDigest();
   });
 };
